@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>حاسبة السبائك والعملات</title>
+<style>
+/* Layout: one phone-width column. Sticky top = mode tabs + live price bar; below = totals, item rows, receipt.
+   Color: cool slate neutrals; teal marks SELL mode, amber marks BUY mode so the two can't be confused.
+   Type: Cairo for everything (Arabic + digits), tabular numerals for prices. */
+:root {
+  --bg: #f1f3f6;
+  --surface: #ffffff;
+  --surface-2: #e9ecf1;
+  --line: #d9dde4;
+  --fg: #1a1d23;
+  --muted: #5a6270;
+  --sell: #0b6a5b;
+  --buy: #94640a;
+  --on-accent: #ffffff;
+  --danger: #b42318;
+  --focus: #2457d6;
+  --font: system-ui, -apple-system, "Segoe UI", Tahoma, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101216; --surface: #1a1d23; --surface-2: #252a32; --line: #2e343d;
+    --fg: #eceef2; --muted: #9ba3b0; --sell: #4fd1b5; --buy: #e6b34a;
+    --on-accent: #14161a; --danger: #ff8a7a; --focus: #7aa2ff; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101216; --surface: #1a1d23; --surface-2: #252a32; --line: #2e343d;
+  --fg: #eceef2; --muted: #9ba3b0; --sell: #4fd1b5; --buy: #e6b34a;
+  --on-accent: #14161a; --danger: #ff8a7a; --focus: #7aa2ff; color-scheme: dark;
+}
+html { color-scheme: light dark; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 16px; line-height: 1.5; }
+* { box-sizing: border-box; }
+#app { --accent: var(--sell); max-width: 560px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 40px; }
+#app[data-mode="buy"] { --accent: var(--buy); }
+.num { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+button, input { font-family: inherit; font-size: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* sticky top */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 12px 10px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+h1 { margin: 0; font-size: 1.05rem; font-weight: 800; letter-spacing: 0; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--surface-2); padding: 4px; border-radius: 12px; }
+.tab { border: 0; background: transparent; padding: 10px 8px; border-radius: 9px; font-weight: 700; color: var(--muted); cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
+.prices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pgroup { background: var(--surface); border: 2px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; gap: 4px; }
+.pgroup[data-active="true"] { border-color: var(--accent); }
+.pgroup h2 { margin: 0; font-size: .8rem; font-weight: 700; color: var(--muted); }
+.pgroup[data-active="true"] h2 { color: var(--accent); }
+.prow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.prow label, .prow span.k { font-size: .82rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.pin { width: 7.2em; min-width: 0; text-align: center; font-weight: 800; border: 1.5px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 4px; direction: ltr; font-variant-numeric: tabular-nums; }
+.pval { font-weight: 700; }
+
+/* totals */
+.totals { margin-top: 14px; background: var(--accent); color: var(--on-accent); border-radius: 16px; padding: 14px 16px; display: grid; gap: 8px; }
+.totals .lbl { font-size: .85rem; font-weight: 600; opacity: .9; }
+.totals .big { font-size: 2rem; font-weight: 800; line-height: 1.15; }
+.totals .big small { font-size: .9rem; font-weight: 600; margin-inline-start: 6px; }
+.weights { display: flex; gap: 8px; flex-wrap: wrap; }
+.weights div { flex: 1 1 120px; background: rgba(255,255,255,.16); border-radius: 10px; padding: 6px 10px; }
+:root[data-theme="dark"] .weights div { background: rgba(0,0,0,.14); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .weights div { background: rgba(0,0,0,.14); } }
+.weights .w { font-weight: 800; font-size: 1.05rem; }
+
+/* sections + rows */
+.sec { margin-top: 18px; display: grid; gap: 8px; }
+.sec h3 { margin: 0 0 2px; font-size: .95rem; font-weight: 800; display: flex; justify-content: space-between; align-items: baseline; }
+.sec h3 span { font-size: .8rem; color: var(--muted); font-weight: 600; }
+.row { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 6px; }
+.row[data-on="true"] { border-color: var(--accent); }
+.rtop { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.nm { font-weight: 700; }
+.nm .g { color: var(--muted); font-weight: 600; font-size: .85rem; margin-inline-start: 6px; }
+.line { font-weight: 800; }
+.line:not(.zero) { color: var(--accent); }
+.line.zero { color: var(--muted); font-weight: 600; }
+.rbot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.unit { display: grid; line-height: 1.2; }
+.unit .k { font-size: .75rem; color: var(--muted); font-weight: 600; }
+.unit .u { font-size: 1.25rem; font-weight: 800; color: var(--fg); }
+.step { display: flex; align-items: center; gap: 6px; }
+.step button { width: 40px; height: 40px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--surface-2); font-weight: 800; font-size: 1.2rem; cursor: pointer; line-height: 1; }
+.step button:active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.step input { width: 3.4em; height: 40px; text-align: center; font-weight: 800; border: 1.5px solid var(--line); background: var(--bg); border-radius: 10px; direction: ltr; }
+
+/* actions */
+.actions { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn { border: 1.5px solid var(--line); background: var(--surface); border-radius: 12px; padding: 12px 10px; font-weight: 700; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.warn { color: var(--danger); }
+.btn.warn[data-arm="true"] { background: var(--danger); color: var(--on-accent); border-color: var(--danger); }
+details { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px; }
+summary { padding: 10px 0; font-weight: 700; cursor: pointer; }
+.premgrid { display: grid; grid-template-columns: 1fr 5.5em 5.5em; gap: 6px 8px; align-items: center; padding-block: 4px 12px; }
+.premgrid .hd { font-size: .8rem; color: var(--muted); font-weight: 700; text-align: center; }
+.premgrid .hd:first-child { text-align: start; }
+.premgrid input { width: 100%; min-width: 0; text-align: center; border: 1.5px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 2px; font-weight: 700; direction: ltr; }
+.note { font-size: .8rem; color: var(--muted); margin: 0 0 10px; }
+
+/* receipt */
+.receipt { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 12px; }
+.receipt h2 { margin: 0; text-align: center; font-size: 1.4rem; font-weight: 800; }
+.meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+.meta label { font-weight: 700; font-size: .9rem; color: var(--muted); }
+.meta input { min-width: 0; border: 1.5px solid var(--line); background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+.meta .d { padding: 8px 2px; font-weight: 700; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: .9rem; }
+th, td { padding: 8px 8px; border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
+th { background: var(--surface-2); font-weight: 700; font-size: .8rem; color: var(--muted); }
+td:first-child, th:first-child { text-align: start; }
+tr:last-child td { border-bottom: 0; }
+td.t { font-weight: 800; }
+.rsum { display: grid; gap: 6px; }
+.rsum .r { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--surface-2); border-radius: 8px; font-weight: 700; }
+.rsum .tot { background: var(--accent); color: var(--on-accent); font-size: 1.15rem; font-weight: 800; padding: 12px; }
+.sign { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; text-align: center; font-weight: 700; font-size: .9rem; }
+.sign div { border-top: 1.5px solid var(--fg); padding-top: 6px; }
+.empty { text-align: center; color: var(--muted); padding: 16px 0; }
+.toast { min-height: 1.4em; text-align: center; font-size: .85rem; color: var(--muted); margin-top: 8px; }
+@media (max-width: 380px) { .totals .big { font-size: 1.7rem; } .pin { width: 6.2em; } }
+@media (prefers-reduced-motion: no-preference) { .tab, .btn, .pgroup, .row { transition: background-color .15s, border-color .15s, color .15s; } }
+</style>
+
+</head>
+<body>
+<div id="app" dir="rtl" lang="ar" data-mode="sell">
+  <div class="top">
+    <h1>حاسبة السبائك والعملات</h1>
+    <div class="tabs" role="tablist" aria-label="نوع العملية">
+      <button class="tab" role="tab" id="tab-sell" data-mode="sell" aria-selected="true">بيع للعميل</button>
+      <button class="tab" role="tab" id="tab-buy" data-mode="buy" aria-selected="false">شراء من العميل</button>
+    </div>
+    <div class="prices" aria-label="أسعار الجرام">
+      <div class="pgroup" id="pg-sell" data-active="true">
+        <h2>أسعار البيع (جنيه / جرام)</h2>
+        <div class="prow"><label for="in-sell21">ع٢١</label><input class="pin" id="in-sell21" inputmode="decimal" autocomplete="off"></div>
+        <div class="prow"><span class="k">ع٢٤</span><span class="pval num" id="v-sell24"></span></div>
+      </div>
+      <div class="pgroup" id="pg-buy" data-active="false">
+        <h2>أسعار الشراء (جنيه / جرام)</h2>
+        <div class="prow"><label for="in-buy21">ع٢١</label><input class="pin" id="in-buy21" inputmode="decimal" autocomplete="off"></div>
+        <div class="prow"><span class="k">ع٢٤</span><span class="pval num" id="v-buy24"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="view-calc">
+    <div class="totals" aria-live="polite">
+      <div class="lbl" id="tot-label">الإجمالي الكلي</div>
+      <div class="big num"><span id="tot">0.00</span><small>جنيه</small></div>
+      <div class="weights">
+        <div><div class="lbl">وزن ع٢١</div><div class="w num" id="w21">0 جم</div></div>
+        <div><div class="lbl">وزن ع٢٤</div><div class="w num" id="w24">0 جم</div></div>
+      </div>
+    </div>
+    <div id="lists"></div>
+    <div class="actions">
+      <button class="btn primary" id="btn-receipt">عرض الإيصال</button>
+      <button class="btn warn" id="btn-clear">مسح الأعداد</button>
+    </div>
+  </div>
+
+  <div id="view-receipt" hidden>
+    <div class="receipt">
+      <h2 id="r-title">إيصال بيع</h2>
+      <div class="meta">
+        <label for="r-name">اسم العميل</label><input id="r-name" autocomplete="off">
+        <label for="r-no">رقم الإيصال</label><input id="r-no" autocomplete="off">
+        <label>التاريخ</label><div class="d num" id="r-date"></div>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>الصنف</th><th>العدد</th><th>سعر العيار</th><th>الإضافة</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
+          <tbody id="r-body"></tbody>
+        </table>
+      </div>
+      <div class="rsum">
+        <div class="r"><span>وزن ع٢١</span><span class="num" id="r-w21"></span></div>
+        <div class="r"><span>وزن ع٢٤</span><span class="num" id="r-w24"></span></div>
+        <div class="r tot"><span>الإجمالي (جنيه)</span><span class="num" id="r-tot"></span></div>
+      </div>
+      <div class="sign"><div>توقيع العميل</div><div>توقيع المسؤول</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="btn-pdf" style="grid-column:1/-1">حفظ / مشاركة الإيصال PDF</button>
+      <button class="btn" id="btn-copy">نسخ نص الإيصال</button>
+      <button class="btn" id="btn-back">رجوع للحساب</button>
+    </div>
+    <p class="toast" id="toast" role="status"></p>
+  </div>
+
+  <details>
+    <summary>العلاوات (تُضاف على سعر الجرام)</summary>
+    <p class="note">تُحفظ على هذا الجهاز. القيم الأصلية من ملفك.</p>
+    <div class="premgrid" id="premgrid"></div>
+  </details>
+</div>
+
+<script>
+/* ---------- calculation (pure) ---------- */
+// CALC-START
+const COINS = [
+  { id: 'c8', g: 8, name: 'جنيه' },
+  { id: 'c4', g: 4, name: 'نصف جنيه' },
+  { id: 'c2', g: 2, name: 'ربع جنيه' }
+];
+const BARS = [1, 2.5, 5, 10, 20, 31.1, 50, 100].map(g => ({ id: 'b' + g, g }));
+const ITEMS = COINS.concat(BARS);
+const DEF = {
+  sell21: 5920, buy21: 5900,
+  prem: {
+    sell: { c8: 77, c4: 82, c2: 87, b1: 187, 'b2.5': 112, b5: 87, b10: 84, b20: 82, 'b31.1': 81, b50: 79, b100: 77 },
+    buy: { c8: 25, c4: 25, c2: 25, b1: 30, 'b2.5': 30, b5: 30, b10: 30, b20: 30, 'b31.1': 30, b50: 30, b100: 30 }
+  }
+};
+const isCoin = it => it.id[0] === 'c';
+const r2 = x => Math.round((x + Number.EPSILON) * 100) / 100;
+const p24of = p21 => r2(p21 / 21 * 24);
+function p21(S, mode) { return mode === 'sell' ? S.sell21 : S.buy21; }
+function basePrice(S, mode, it) { return isCoin(it) ? p21(S, mode) : p24of(p21(S, mode)); }
+function unitPrice(S, mode, it) { return it.g * (basePrice(S, mode, it) + S.prem[mode][it.id]); }
+function compute(S, mode) {
+  let total = 0, w21 = 0, w24 = 0;
+  const lines = {};
+  for (const it of ITEMS) {
+    const n = S.counts[mode][it.id] || 0;
+    const u = unitPrice(S, mode, it);
+    lines[it.id] = { n, u, t: u * n };
+    total += u * n;
+    if (isCoin(it)) w21 += it.g * n; else w24 += it.g * n;
+  }
+  return { total, w21, w24, lines };
+}
+// CALC-END
+
+/* ---------- state ---------- */
+const KEY = 'gold-calc-v1';
+const S = {
+  sell21: DEF.sell21, buy21: DEF.buy21,
+  prem: JSON.parse(JSON.stringify(DEF.prem)),
+  counts: { sell: {}, buy: {} },
+  mode: 'sell', name: '', no: ''
+};
+try {
+  const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+  if (saved) {
+    if (saved.sell21 > 0) S.sell21 = saved.sell21;
+    if (saved.buy21 > 0) S.buy21 = saved.buy21;
+    for (const m of ['sell', 'buy']) for (const id in DEF.prem[m]) {
+      const v = saved.prem && saved.prem[m] && saved.prem[m][id];
+      if (typeof v === 'number' && isFinite(v)) S.prem[m][id] = v;
+    }
+  }
+} catch (e) {}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify({ sell21: S.sell21, buy21: S.buy21, prem: S.prem })); } catch (e) {}
+}
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const AR = '٠١٢٣٤٥٦٧٨٩';
+function parseNum(s) {
+  s = String(s).replace(/[٠-٩]/g, d => AR.indexOf(d)).replace(/٫/g, '.').replace(/[,٬\s]/g, '');
+  const v = parseFloat(s);
+  return isFinite(v) ? v : NaN;
+}
+const fmt = x => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtG = x => (Math.round(x * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const itemName = it => isCoin(it) ? it.name + ' ذهب (ع٢١)' : 'سبيكة ذهب ع٢٤ - ' + it.g + ' جم';
+const modeWord = m => m === 'sell' ? 'بيع' : 'شراء';
+
+/* ---------- build ---------- */
+function buildLists() {
+  const mode = S.mode;
+  const box = $('lists');
+  box.textContent = '';
+  const mk = (title, sub, items) => {
+    const sec = document.createElement('section');
+    sec.className = 'sec';
+    const h = document.createElement('h3');
+    h.innerHTML = '<b></b><span></span>';
+    h.firstChild.textContent = title; h.lastChild.textContent = sub;
+    sec.appendChild(h);
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'row'; row.dataset.id = it.id;
+      row.innerHTML =
+        '<div class="rtop"><div class="nm"></div><div class="line num"></div></div>' +
+        '<div class="rbot"><div class="unit"><span class="k">سعر الوحدة</span><span class="num u"></span></div>' +
+        '<div class="step"><button type="button" aria-label="إنقاص" data-d="-1">−</button>' +
+        '<input inputmode="numeric" autocomplete="off" aria-label="العدد"><button type="button" aria-label="زيادة" data-d="1">+</button></div></div>';
+      const nm = row.querySelector('.nm');
+      nm.textContent = isCoin(it) ? it.name : 'سبيكة';
+      const g = document.createElement('span'); g.className = 'g'; g.textContent = it.g + ' جم';
+      nm.appendChild(g);
+      const inp = row.querySelector('input');
+      const setN = n => {
+        n = Math.max(0, Math.min(9999, Math.floor(n) || 0));
+        if (n) S.counts[mode][it.id] = n; else delete S.counts[mode][it.id];
+        inp.value = n ? String(n) : '';
+        update();
+      };
+      inp.value = S.counts[mode][it.id] ? String(S.counts[mode][it.id]) : '';
+      inp.addEventListener('input', () => { const v = parseNum(inp.value); const n = isNaN(v) ? 0 : Math.max(0, Math.min(9999, Math.floor(v))); if (n) S.counts[mode][it.id] = n; else delete S.counts[mode][it.id]; update(); });
+      inp.addEventListener('blur', () => { inp.value = S.counts[mode][it.id] ? String(S.counts[mode][it.id]) : ''; });
+      row.querySelectorAll('button').forEach(b => b.addEventListener('click', () => setN((S.counts[mode][it.id] || 0) + Number(b.dataset.d))));
+      sec.appendChild(row);
+    }
+    box.appendChild(sec);
+  };
+  mk('العملات', 'عيار ٢١', COINS);
+  mk('السبائك', 'عيار ٢٤', BARS);
+}
+
+function buildPrem() {
+  const g = $('premgrid');
+  g.textContent = '';
+  for (const t of ['الصنف', 'علاوة البيع', 'علاوة الشراء']) {
+    const d = document.createElement('div'); d.className = 'hd'; d.textContent = t; g.appendChild(d);
+  }
+  for (const it of ITEMS) {
+    const l = document.createElement('div');
+    l.textContent = (isCoin(it) ? it.name + ' (ع٢١) - ' : 'سبيكة (ع٢٤) - ') + it.g + ' جم';
+    l.style.fontSize = '.85rem'; l.style.fontWeight = '600';
+    g.appendChild(l);
+    for (const m of ['sell', 'buy']) {
+      const i = document.createElement('input');
+      i.inputMode = 'decimal'; i.autocomplete = 'off';
+      i.id = 'prem-' + m + '-' + it.id.replace('.', '_');
+      i.setAttribute('aria-label', 'علاوة ' + modeWord(m) + ' ' + it.g + ' جم');
+      i.value = String(S.prem[m][it.id]);
+      i.addEventListener('input', () => { const v = parseNum(i.value); if (!isNaN(v)) { S.prem[m][it.id] = v; save(); update(); } });
+      i.addEventListener('blur', () => { i.value = String(S.prem[m][it.id]); });
+      g.appendChild(i);
+    }
+  }
+}
+
+/* ---------- update ---------- */
+function update() {
+  const mode = S.mode;
+  $('app').dataset.mode = mode;
+  for (const m of ['sell', 'buy']) {
+    $('tab-' + m).setAttribute('aria-selected', String(m === mode));
+    $('pg-' + m).dataset.active = String(m === mode);
+    $('v-' + m + '24').textContent = fmt(p24of(p21(S, m)));
+  }
+  const c = compute(S, mode);
+  $('tot-label').textContent = 'الإجمالي الكلي - ' + modeWord(mode);
+  $('tot').textContent = fmt(c.total);
+  $('w21').textContent = fmtG(c.w21) + ' جم';
+  $('w24').textContent = fmtG(c.w24) + ' جم';
+  document.querySelectorAll('#lists .row').forEach(row => {
+    const L = c.lines[row.dataset.id];
+    row.dataset.on = String(L.n > 0);
+    row.querySelector('.u').textContent = fmt(L.u);
+    const ln = row.querySelector('.line');
+    ln.textContent = L.n ? fmt(L.t) : '—';
+    ln.classList.toggle('zero', !L.n);
+  });
+  if (!$('view-receipt').hidden) renderReceipt(c);
+}
+
+function usedItems(c) { return ITEMS.filter(it => c.lines[it.id].n > 0); }
+
+function renderReceipt(c) {
+  const mode = S.mode;
+  c = c || compute(S, mode);
+  $('r-title').textContent = 'إيصال ' + modeWord(mode);
+  const d = new Date();
+  $('r-date').textContent = [d.getDate(), d.getMonth() + 1, d.getFullYear()].map((x, i) => String(x).padStart(i < 2 ? 2 : 4, '0')).join('/');
+  const body = $('r-body');
+  body.textContent = '';
+  const used = usedItems(c);
+  if (!used.length) {
+    const tr = document.createElement('tr'); const td = document.createElement('td');
+    td.colSpan = 6; td.className = 'empty'; td.textContent = 'لا توجد أصناف بعد. أدخل الأعداد في صفحة الحساب.';
+    tr.appendChild(td); body.appendChild(tr);
+  }
+  for (const it of used) {
+    const L = c.lines[it.id];
+    const cells = [itemName(it), String(L.n), fmt(basePrice(S, mode, it)), String(S.prem[mode][it.id]), fmt(L.u), fmt(L.t)];
+    const tr = document.createElement('tr');
+    cells.forEach((t, i) => {
+      const td = document.createElement('td'); td.textContent = t;
+      if (i > 0) td.className = 'num' + (i === 5 ? ' t' : '');
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+  $('r-w21').textContent = fmtG(c.w21) + ' جم';
+  $('r-w24').textContent = fmtG(c.w24) + ' جم';
+  $('r-tot').textContent = fmt(c.total);
+}
+
+function receiptText() {
+  const mode = S.mode, c = compute(S, mode);
+  const L = ['إيصال ' + modeWord(mode)];
+  if ($('r-name').value.trim()) L.push('العميل: ' + $('r-name').value.trim());
+  if ($('r-no').value.trim()) L.push('رقم الإيصال: ' + $('r-no').value.trim());
+  L.push('التاريخ: ' + $('r-date').textContent);
+  L.push('سعر جرام ع٢١: ' + fmt(p21(S, mode)) + ' | سعر جرام ع٢٤: ' + fmt(p24of(p21(S, mode))));
+  L.push('----------');
+  for (const it of usedItems(c)) {
+    const l = c.lines[it.id];
+    L.push(itemName(it) + ' × ' + l.n + ' × ' + fmt(l.u) + ' = ' + fmt(l.t));
+  }
+  L.push('----------');
+  L.push('وزن ع٢١: ' + fmtG(c.w21) + ' جم');
+  L.push('وزن ع٢٤: ' + fmtG(c.w24) + ' جم');
+  L.push('الإجمالي: ' + fmt(c.total) + ' جنيه');
+  return L.join('\n');
+}
+
+/* ---------- events ---------- */
+function say(t) { $('toast').textContent = t; clearTimeout(say.t); say.t = setTimeout(() => { $('toast').textContent = ''; }, 3500); }
+
+for (const m of ['sell', 'buy']) {
+  const inp = $('in-' + m + '21');
+  inp.value = String(S[m + '21']);
+  inp.addEventListener('input', () => { const v = parseNum(inp.value); if (v > 0) { S[m + '21'] = v; save(); update(); } });
+  inp.addEventListener('blur', () => { inp.value = String(S[m + '21']); });
+  $('tab-' + m).addEventListener('click', () => setMode(m));
+}
+function setMode(m) {
+  S.mode = m;
+  buildLists(); update();
+  try { history.replaceState(null, '', '#' + m); } catch (e) {}
+}
+$('btn-receipt').addEventListener('click', () => {
+  $('view-calc').hidden = true; $('view-receipt').hidden = false; renderReceipt(); window.scrollTo(0, 0);
+});
+$('btn-back').addEventListener('click', () => {
+  $('view-receipt').hidden = true; $('view-calc').hidden = false; window.scrollTo(0, 0);
+});
+$('btn-copy').addEventListener('click', async () => {
+  const text = receiptText();
+  try { await navigator.clipboard.writeText(text); say('تم نسخ نص الإيصال'); }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'width:100%;height:9em;margin-top:8px';
+    $('toast').textContent = ''; $('toast').appendChild(ta); ta.focus(); ta.select();
+    say.t = null;
+  }
+});
+let armTimer;
+$('btn-clear').addEventListener('click', () => {
+  const b = $('btn-clear');
+  if (b.dataset.arm === 'true') {
+    S.counts[S.mode] = {}; b.dataset.arm = 'false'; b.textContent = 'مسح الأعداد'; clearTimeout(armTimer);
+    buildLists(); update();
+  } else {
+    b.dataset.arm = 'true'; b.textContent = 'اضغط مرة أخرى للتأكيد';
+    armTimer = setTimeout(() => { b.dataset.arm = 'false'; b.textContent = 'مسح الأعداد'; }, 3000);
+  }
+});
+$('r-name').addEventListener('input', e => { S.name = e.target.value; });
+$('r-no').addEventListener('input', e => { S.no = e.target.value; });
+
+
+/* ---------- PDF receipt (canvas -> JPEG -> single-page PDF) ---------- */
+function drawReceipt() {
+  const mode = S.mode, c = compute(S, mode), used = usedItems(c);
+  const W = 1240, M = 60, accent = mode === 'sell' ? '#0b6a5b' : '#94640a';
+  const FONT = 'system-ui, -apple-system, "Segoe UI", Tahoma, Arial, sans-serif';
+  const rowH = 70, headH = 74;
+  const H = Math.max(1754, 460 + headH + Math.max(used.length, 1) * rowH + 3 * 84 + 300);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.direction = 'rtl'; x.textBaseline = 'middle';
+  const T = (t, px, py, o) => {
+    o = o || {}; let size = o.size || 34;
+    x.font = (o.w || 600) + ' ' + size + 'px ' + FONT;
+    if (o.max) while (x.measureText(t).width > o.max && size > 18) { size -= 2; x.font = (o.w || 600) + ' ' + size + 'px ' + FONT; }
+    x.fillStyle = o.color || '#111'; x.textAlign = o.align || 'right'; x.fillText(t, px, py);
+  };
+  let y = 120;
+  T('إيصال ' + modeWord(mode), W / 2, y, { size: 70, w: 800, align: 'center' });
+  y += 90;
+  x.fillStyle = accent; x.fillRect(M, y, W - 2 * M, 6); y += 56;
+  const name = $('r-name').value.trim(), no = $('r-no').value.trim();
+  T('اسم العميل:', W - M, y, { color: '#555' }); T(name || '................', W - M - 190, y, { w: 700, max: 600 });
+  T('التاريخ:', 420, y, { color: '#555' }); T($('r-date').textContent, 330, y, { w: 700 });
+  y += 64;
+  T('رقم الإيصال:', W - M, y, { color: '#555' }); T(no || '................', W - M - 190, y, { w: 700, max: 600 });
+  y += 64;
+  T('سعر جرام ع٢١: ' + fmt(p21(S, mode)) + '    |    سعر جرام ع٢٤: ' + fmt(p24of(p21(S, mode))), W - M, y, { color: '#555', size: 30 });
+  y += 70;
+  // table: columns right -> left
+  const cols = [380, 90, 170, 110, 190, 180];
+  const heads = ['الصنف', 'العدد', 'سعر العيار', 'الإضافة', 'سعر الوحدة', 'الإجمالي'];
+  const xr = []; let cur = W - M; for (const w of cols) { xr.push([cur, cur - w]); cur -= w; }
+  x.fillStyle = '#e9ecf1'; x.fillRect(M, y, W - 2 * M, headH);
+  heads.forEach((h, i) => { const [a, b] = xr[i]; T(h, i === 0 ? a - 14 : (a + b) / 2, y + headH / 2, { size: 30, w: 700, color: '#444', align: i === 0 ? 'right' : 'center', max: cols[i] - 16 }); });
+  y += headH;
+  if (!used.length) { T('لا توجد أصناف', W / 2, y + rowH / 2, { align: 'center', color: '#777' }); y += rowH; }
+  used.forEach(it => {
+    const L = c.lines[it.id];
+    const cells = [itemName(it), String(L.n), fmt(basePrice(S, mode, it)), String(S.prem[mode][it.id]), fmt(L.u), fmt(L.t)];
+    cells.forEach((t, i) => { const [a, b] = xr[i]; T(t, i === 0 ? a - 14 : (a + b) / 2, y + rowH / 2, { size: 30, w: i === 5 ? 800 : 600, align: i === 0 ? 'right' : 'center', max: cols[i] - 16 }); });
+    x.fillStyle = '#d9dde4'; x.fillRect(M, y + rowH - 2, W - 2 * M, 2);
+    y += rowH;
+  });
+  y += 36;
+  const line = (label, val, big) => {
+    if (big) { x.fillStyle = accent; x.fillRect(M, y, W - 2 * M, 96); }
+    else { x.fillStyle = '#f1f3f6'; x.fillRect(M, y, W - 2 * M, 72); }
+    const h = big ? 96 : 72, col = big ? '#fff' : '#111';
+    T(label, W - M - 24, y + h / 2, { size: big ? 40 : 32, w: 700, color: col });
+    T(val, M + 24, y + h / 2, { size: big ? 48 : 34, w: 800, color: col, align: 'left' });
+    y += h + 14;
+  };
+  line('وزن ع٢١', fmtG(c.w21) + ' جم');
+  line('وزن ع٢٤', fmtG(c.w24) + ' جم');
+  line('الإجمالي (جنيه)', fmt(c.total), true);
+  y += 90;
+  x.fillStyle = '#111';
+  x.fillRect(M + 40, y, 400, 3); x.fillRect(W - M - 440, y, 400, 3);
+  T('توقيع المسؤول', M + 240, y + 40, { align: 'center', size: 30, color: '#444' });
+  T('توقيع العميل', W - M - 240, y + 40, { align: 'center', size: 30, color: '#444' });
+  return cv;
+}
+function buildPdf(jpeg, iw, ih) {
+  const pw = 420, ph = Math.round(ih * pw / iw * 100) / 100, enc = new TextEncoder();
+  const parts = []; let off = 0; const offs = [];
+  const push = b => { if (typeof b === 'string') b = enc.encode(b); parts.push(b); off += b.length; };
+  const obj = (n, body) => { offs[n] = off; push(n + ' 0 obj\n' + body + '\nendobj\n'); };
+  push('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  obj(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pw + ' ' + ph + '] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>');
+  const cs = 'q ' + pw + ' 0 0 ' + ph + ' 0 0 cm /Im0 Do Q';
+  obj(4, '<< /Length ' + cs.length + ' >>\nstream\n' + cs + '\nendstream');
+  offs[5] = off;
+  push('5 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + iw + ' /Height ' + ih + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpeg.length + ' >>\nstream\n');
+  push(jpeg); push('\nendstream\nendobj\n');
+  const xref = off; let t = 'xref\n0 6\n0000000000 65535 f \n';
+  for (let i = 1; i <= 5; i++) t += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+  push(t + 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF');
+  return new Blob(parts, { type: 'application/pdf' });
+}
+async function savePdf() {
+  const cv = drawReceipt();
+  const b64 = cv.toDataURL('image/jpeg', 0.92).split(',')[1], bin = atob(b64);
+  const jpeg = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) jpeg[i] = bin.charCodeAt(i);
+  const blob = buildPdf(jpeg, cv.width, cv.height);
+  const d = new Date(), stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+  const fname = 'receipt-' + S.mode + '-' + stamp + '.pdf';
+  const file = new File([blob], fname, { type: 'application/pdf' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+  const tt = $('toast'); tt.textContent = '';
+  const l = document.createElement('a'); l.href = url; l.target = '_blank'; l.textContent = 'إن لم يبدأ التنزيل، اضغط هنا لفتح الإيصال PDF'; l.style.color = 'var(--accent)'; l.style.fontWeight = '700';
+  tt.appendChild(l);
+}
+$('btn-pdf').addEventListener('click', () => { savePdf().catch(() => say('تعذر إنشاء الملف على هذا المتصفح')); });
+
+/* ---------- start ---------- */
+buildPrem();
+S.mode = location.hash === '#buy' ? 'buy' : 'sell';
+buildLists();
+update();
+window.addEventListener('hashchange', () => { const m = location.hash === '#buy' ? 'buy' : location.hash === '#sell' ? 'sell' : null; if (m && m !== S.mode) setMode(m); });
+</script>
+
+</html>
